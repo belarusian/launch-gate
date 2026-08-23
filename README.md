@@ -25,13 +25,31 @@ script that invocation runs.
 
 ## The four checks
 
-1. **redirect-safety** — a continuation launch must append (`>>`) to `cycles.out`;
-   a bare `>` against an existing marker file is NO-GO; a first launch is GO.
+1. **redirect-safety** — classifies how the launch line redirects into
+   `cycles.out` and gates against the existing history:
+   - `>> cycles.out` (append) is always GO — it preserves history.
+   - a bare `>` / `1> cycles.out` (truncate) is NO-GO when the existing
+     `cycles.out` carries a `========== CYCLE N ==========` marker line
+     (it would wipe the history); it is GO when there is no history file
+     (first launch) or the file has no markers yet.
+   - a line that does not redirect into `cycles.out` (no redirect, a
+     redirect to a *different* file, `2> cycles.out` stderr-only, or
+     `2>&1`) is GO — nothing to gate.
+   The marker dialect is the seed's `========== CYCLE N  <utc> ==========`
+   (4+ equals, `CYCLE`, a number); a `========== CYCLE N done ==========`
+   line also counts. Whitespace between `>` and `cycles.out` is tolerated.
 2. **endpoint-contention** — via the launch-registry (below), with a socket
    snapshot fallback. Never guesses occupancy.
 3. **wall-sizing (B1)** — `outer_wall >= 3 * max_observed` inner-pass duration.
-4. **prerequisites** — runner prompt + gate log present/non-empty; clean, synced
-   main; optional fourseer/spoke-lint/loop-doctor verdicts folded in.
+4. **prerequisites** — verifies the launch prerequisites:
+   - a runner prompt and a gate log exist and are non-empty in `ai/`
+     (found by a substring match over the directory: `runner-prompt`/`runner`
+     and `gate`/`cycle`, first match in sorted order wins);
+   - the checkout is a git repo on `main`, with a clean tree and `main` in
+     sync with `origin/main` (a missing `origin/main` is a note, not NO-GO);
+   - stranded `build*` branches are reported as a Phase-0 note (not NO-GO);
+   - `fourseer` / `spoke_lint` / `loop_doctor` are probed in that fixed order
+     and reported honestly as importable (verdict folded in) or not available.
 
 ## Canonical launch-registry block (every four driver must carry)
 
