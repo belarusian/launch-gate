@@ -250,3 +250,94 @@ def test_tools_mixed_probe_is_per_tool(tmp_path: Path) -> None:
         "spoke_lint: not available on this host.",
         "loop_doctor: not available on this host.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Cycle 4 edge-case sweep: forms the Cycle-3 dedicated tests did not pin.
+# ---------------------------------------------------------------------------
+
+
+def test_both_missing_reports_runner_then_gate(tmp_path: Path) -> None:
+    # When neither artifact exists, the runner-prompt NO-GO line precedes the
+    # gate-log NO-GO line (fixed order), and the verdict is NO-GO.
+    ai = tmp_path / "ai"
+    ai.mkdir()
+    result = check_prerequisites(ai, tmp_path, git_state=_go_git(), tool_available=_no_tools)
+    assert result.go is False
+    assert result.lines[:2] == (
+        "NO-GO: no runner prompt found in ai/.",
+        "NO-GO: no gate log found in ai/.",
+    )
+
+
+def test_file_matching_prefers_sorted_first_substring_match(tmp_path: Path) -> None:
+    # The gate-log search is a substring match over ``rglob`` in sorted order:
+    # the first file whose name contains "gate" wins. A decoy that sorts before
+    # the real log is returned (documenting the current heuristic).
+    ai = tmp_path / "ai"
+    ai.mkdir()
+    (ai / "a-gate-notes.md").write_text("decoy\n", encoding="utf-8")
+    (ai / "cycle-001-spoke-lint-gate.md").write_text("real log\n", encoding="utf-8")
+    (ai / "runner-prompt.md").write_text("prompt\n", encoding="utf-8")
+    result = check_prerequisites(ai, tmp_path, git_state=_go_git(), tool_available=_no_tools)
+    assert result.go is True
+    assert result.lines[1] == "gate log present and non-empty: a-gate-notes.md."
+
+
+def test_gate_log_falls_back_to_cycle_substring(tmp_path: Path) -> None:
+    # A gate log named only with "cycle" (no "gate") is still found via the
+    # ``_find_ai_file(ai_dir, "cycle")`` fallback.
+    ai = tmp_path / "ai"
+    ai.mkdir()
+    (ai / "cycle-001-spoke-lint-gate.md").write_text("log\n", encoding="utf-8")
+    (ai / "runner-prompt.md").write_text("prompt\n", encoding="utf-8")
+    result = check_prerequisites(ai, tmp_path, git_state=_go_git(), tool_available=_no_tools)
+    assert result.go is True
+    assert result.lines[1] == "gate log present and non-empty: cycle-001-spoke-lint-gate.md."
+
+
+def test_multiple_stranded_branches_joined_in_one_note(tmp_path: Path) -> None:
+    # Several stranded build branches are joined into a single Phase-0 note
+    # (comma-separated, in the order given) and the verdict stays GO.
+    ai = tmp_path / "ai"
+    _make_ai(ai)
+    state = GitState(True, "main", True, 0, 0, True, ("build1", "build2", "build3"))
+    result = check_prerequisites(ai, tmp_path, git_state=state, tool_available=_no_tools)
+    assert result.go is True
+    assert result.lines[5] == (
+        "Phase-0 signal: stranded build branch(es) build1, build2, build3 (note, not NO-GO)."
+    )
+
+
+def test_tool_fold_in_is_fixed_order_per_tool(tmp_path: Path) -> None:
+    # The three tools are probed in the fixed order fourseer, spoke_lint,
+    # loop_doctor, each reported independently of the others.
+    ai = tmp_path / "ai"
+    _make_ai(ai)
+    result = check_prerequisites(
+        ai,
+        tmp_path,
+        git_state=_go_git(),
+        tool_available=lambda t: t in ("spoke_lint", "loop_doctor"),
+    )
+    assert result.go is True
+    assert result.lines[5:] == (
+        "fourseer: not available on this host.",
+        "spoke_lint: importable on this host (verdict folded in).",
+        "loop_doctor: importable on this host (verdict folded in).",
+    )
+
+
+def test_file_matching_skips_subdirectories(tmp_path: Path) -> None:
+    # A *directory* whose name matches the gate substring must be skipped by
+    # the file-matching heuristic (only files are candidates); the real gate
+    # log file is still found.
+    ai = tmp_path / "ai"
+    ai.mkdir()
+    (ai / "gate-notes").mkdir()  # a directory named like a gate
+    (ai / "gate-notes" / "inner.md").write_text("not a gate log\n", encoding="utf-8")
+    (ai / "real-gate.md").write_text("log\n", encoding="utf-8")
+    (ai / "runner-prompt.md").write_text("prompt\n", encoding="utf-8")
+    result = check_prerequisites(ai, tmp_path, git_state=_go_git(), tool_available=_no_tools)
+    assert result.go is True
+    assert result.lines[1] == "gate log present and non-empty: real-gate.md."
