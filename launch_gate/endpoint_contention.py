@@ -22,7 +22,6 @@ source (a registry entry or a socket line) or an explicit "no data" note.
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -176,7 +175,10 @@ def scan_registry(
     for path in files:
         entry = _parse_registry_file(path)
         if entry is None:
-            lines.append(f"registry file {path.name} is malformed; skipped (not counted as occupancy).")
+            lines.append(
+                f"registry file {path.name} is malformed; "
+                f"skipped (not counted as occupancy)."
+            )
             continue
         overlap = [e for e in entry.endpoints if e in target_set]
         if not overlap:
@@ -272,7 +274,13 @@ def parse_ss(text: str) -> list[SocketLine]:
         if m:
             process = m.group(1)
             pid = int(m.group(2))
-        lines.append(SocketLine(local_hostport=f"{hostport[0]}:{hostport[1]}", pid=pid, process=process))
+        lines.append(
+            SocketLine(
+                local_hostport=f"{hostport[0]}:{hostport[1]}",
+                pid=pid,
+                process=process,
+            )
+        )
     return lines
 
 
@@ -390,5 +398,8 @@ def check_endpoint_contention(
     lines.extend(sock_lines)
 
     if not sock_covered:
-        lines.append("no occupancy data (no registry, no socket snapshot); GO with no occupancy data.")
+        lines.append(
+            "no occupancy data (no registry, no socket snapshot); "
+            "GO with no occupancy data."
+        )
     return CheckResult("endpoint-contention", sock_go, tuple(lines))
