@@ -81,7 +81,7 @@ def parse_endpoints(script_text: str) -> list[str]:
         if not _FIVE_ASSIGN_RE.search(line):
             continue
         for match in _URL_RE.finditer(line):
-            url = match.group(0).rstrip(".,;")
+            url = match.group(0).rstrip(".,;}\"'")
             if url not in seen:
                 seen.append(url)
     return seen
@@ -246,8 +246,10 @@ class SocketLine:
 def parse_ss(text: str) -> list[SocketLine]:
     """Parse ``ss -tnp`` output into established socket lines.
 
-    Only lines in the ``ESTAB`` state are returned. The local address is the
-    second column; the owning pid/process come from the trailing
+    Only lines in the ``ESTAB`` state are returned. The columns are
+    ``[Netid, State, Recv-Q, Send-Q, Local Address:Port, Peer Address:Port,
+    Process]``; the state is the second column and the local address the
+    fifth. The owning pid/process come from the trailing
     ``users:(("name",pid=N,...))`` field when present.
 
     Args:
@@ -259,12 +261,12 @@ def parse_ss(text: str) -> list[SocketLine]:
     lines: list[SocketLine] = []
     for raw in text.splitlines():
         cols = raw.split()
-        if len(cols) < 4:
+        if len(cols) < 5:
             continue
-        state = cols[0]
+        state = cols[1]
         if state != "ESTAB":
             continue
-        local = cols[3]
+        local = cols[4]
         hostport = local.rsplit(":", 1)
         if len(hostport) != 2:
             continue
