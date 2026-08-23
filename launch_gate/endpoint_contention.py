@@ -87,23 +87,75 @@ def parse_endpoints(script_text: str) -> list[str]:
     return seen
 
 
+def _split_netloc(url: str) -> tuple[str, str]:
+    """Split a URL into ``(scheme, netloc)`` without consulting ``urlparse``.
+
+    ``urlparse`` raises ``ValueError`` on a bare-IPv6 netloc (e.g.
+    ``http://::1:8080/v1``), so the netloc is extracted by hand: the scheme is
+    the text before ``://`` and the netloc is the text after it up to the first
+    ``/``, ``?`` or ``#``.
+
+    Args:
+        url: An endpoint URL.
+
+    Returns:
+        A ``(scheme, netloc)`` tuple (scheme lower-cased, netloc verbatim).
+    """
+    scheme = ""
+    rest = url
+    if "://" in url:
+        scheme, rest = url.split("://", 1)
+    for sep in ("/", "?", "#"):
+        idx = rest.find(sep)
+        if idx != -1:
+            rest = rest[:idx]
+    return scheme.lower(), rest
+
+
 def endpoint_hostport(url: str) -> str:
-    """Return the ``host:port`` of an endpoint URL.
+    """Return the canonical ``host:port`` of an endpoint URL.
+
+    The returned form is the SAME canonical ``host:port`` that :func:`parse_ss`
+    yields for a matching ``ESTAB`` line, so the socket-overlap test matches.
+    IPv6 hosts are always bracketed (``[::1]:8080``); IPv4 hosts and hostnames
+    are returned bare (``192.168.1.161:8080``).
+
+    The function is total: it never raises on a bare-IPv6 URL (which
+    ``urlparse`` rejects) and never strips brackets from a bracketed-IPv6 URL
+    (which ``urlparse`` would).
 
     Args:
         url: An endpoint URL such as ``http://192.168.1.161:8080/v1``.
 
     Returns:
-        The ``host:port`` string (e.g. ``192.168.1.161:8080``). When the URL has
-        no explicit port, the scheme default (``80`` for http, ``443`` for https)
-        is used.
+        The ``host:port`` string. When the URL has no explicit port, the scheme
+        default (``80`` for http, ``443`` for https) is used.
     """
+    scheme, netloc = _split_netloc(url)
+    default_port = "443" if scheme == "https" else "80"
+
+    # Bracketed IPv6 netloc: keep the brackets verbatim.
+    if netloc.startswith("["):
+        close = netloc.find("]")
+        if close != -1:
+            host = netloc[: close + 1]
+            port = netloc[close + 1 :].lstrip(":")
+            return f"{host}:{port or default_port}"
+
+    # Bare IPv6 netloc (no brackets, host contains ':'): bracket the host.
+    if netloc.count(":") >= 2:
+        if netloc.count(":") >= 3:
+            host, _, port = netloc.rpartition(":")
+            return f"[{host}]:{port or default_port}"
+        return f"[{netloc}]:{default_port}"
+
+    # IPv4 / hostname: urlparse is safe here.
     parsed = urlparse(url)
     host = parsed.hostname or ""
-    port = parsed.port
-    if port is None:
-        port = 443 if parsed.scheme == "https" else 80
-    return f"{host}:{port}"
+    port_num = parsed.port
+    if port_num is None:
+        port_num = 443 if parsed.scheme == "https" else 80
+    return f"{host}:{port_num}"
 
 
 def _parse_registry_file(path: Path) -> RegistryEntry | None:
