@@ -10,11 +10,12 @@ deterministic path. It also re-exports the
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from launch_gate.endpoint_contention import check_endpoint_contention
 from launch_gate.models import CheckResult
-from launch_gate.prerequisites import check_prerequisites
+from launch_gate.prerequisites import GitState, check_prerequisites
 from launch_gate.redirect_safety import check_redirect_safety
 from launch_gate.wall_sizing import check_wall_sizing
 
@@ -39,6 +40,8 @@ def run_checks(
     project_dir: Path,
     ss_file: Path | None = None,
     driver_lineage: set[int] | None = None,
+    git_state: GitState | None = None,
+    tool_available: Callable[[str], bool] | None = None,
 ) -> tuple[CheckResult, ...]:
     """Run the four named launch-gate checks in stable order.
 
@@ -59,6 +62,13 @@ def run_checks(
         ss_file: An optional pre-captured ``ss`` snapshot file.
         driver_lineage: The checked driver's own pid lineage (for socket
             attribution). Defaults to the empty set.
+        git_state: An optional pre-collected :class:`GitState` for the
+            prerequisites check. When ``None``, it is collected from
+            ``project_dir`` (which shells out to ``git``). Supplying it keeps
+            the orchestration path deterministic and subprocess-free.
+        tool_available: An optional ``tool -> bool`` callable for the
+            prerequisites check's auxiliary-tool probe. When ``None``, the
+            default import-spec probe is used.
 
     Returns:
         A tuple of four :class:`CheckResult` in stable order:
@@ -76,5 +86,10 @@ def run_checks(
             driver_lineage=driver_lineage,
         ),
         check_wall_sizing(script_text, ai_dir, project_dir),
-        check_prerequisites(ai_dir, project_dir),
+        check_prerequisites(
+            ai_dir,
+            project_dir,
+            git_state=git_state,
+            tool_available=tool_available,
+        ),
     )
