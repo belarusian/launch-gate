@@ -574,3 +574,75 @@ def test_q_no_script_no_observations_is_conservative_default_go(tmp_path: Path) 
         "(no fourseer Duration, no cycles.out timestamps).",
         "conservative default row applies; GO with no observations.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Cycle 10 — fourseer report with MULTIPLE observed Duration rows.
+# ---------------------------------------------------------------------------
+
+
+def _fourseer_multi_text() -> str:
+    return (FIXTURES / "fourseer-report-multi.txt").read_text(encoding="utf-8")
+
+
+def _ai_dir_with_fourseer_multi(tmp_path: Path) -> Path:
+    ai = tmp_path / "ai"
+    ai.mkdir()
+    (ai / "fourseer-report-multi.txt").write_text(_fourseer_multi_text(), encoding="utf-8")
+    return ai
+
+
+def test_durations_from_fourseer_multi_returns_both_observed() -> None:
+    # Two observed rows (1358, 1420) are returned in order; the dash row is
+    # skipped.
+    assert durations_from_fourseer(_fourseer_multi_text()) == [1358, 1420]
+
+
+def test_wall_sizing_multi_observations_uses_max_go(tmp_path: Path) -> None:
+    # With observations [1358, 1420], the required wall is 3 * max = 3 * 1420
+    # = 4260s. The 10800s outer wall is sufficient -> GO. The evidence line
+    # names the MAX observed (1420), not the first (1358).
+    ai = _ai_dir_with_fourseer_multi(tmp_path)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    result = check_wall_sizing(BIG_SCRIPT, ai, proj)
+    assert result.go is True
+    assert result.lines == (
+        "outer wall (perl alarm): 10800s.",
+        "--inner-seconds: 3000s.",
+        "observed inner-pass durations: [1358, 1420].",
+        "source: fourseer report fourseer-report-multi.txt: 2 duration(s).",
+        "outer wall 10800s >= 3 * max_observed 1420s (4260s). GO.",
+    )
+
+
+def test_wall_sizing_multi_observations_uses_max_no_go(tmp_path: Path) -> None:
+    # Same observations, but the 1000s outer wall is below 3 * max (4260s)
+    # -> NO-GO, again keyed off the MAX observed (1420).
+    ai = _ai_dir_with_fourseer_multi(tmp_path)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    result = check_wall_sizing(SMALL_SCRIPT, ai, proj)
+    assert result.go is False
+    assert result.lines == (
+        "outer wall (perl alarm): 1000s.",
+        "--inner-seconds: 3000s.",
+        "observed inner-pass durations: [1358, 1420].",
+        "source: fourseer report fourseer-report-multi.txt: 2 duration(s).",
+        "outer wall 1000s < 3 * max_observed 1420s (4260s). NO-GO.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Cycle 10 — cycles.out with only ``done`` markers (no start timestamps).
+# ---------------------------------------------------------------------------
+
+
+def _cycles_done_only_text() -> str:
+    return (FIXTURES / "cycles_out_done_only.out").read_text(encoding="utf-8")
+
+
+def test_durations_from_cycles_out_done_only_returns_empty() -> None:
+    # ``done`` markers carry no timestamp; with no start markers there are no
+    # consecutive stamps to pair, so no durations are derived.
+    assert durations_from_cycles_out(_cycles_done_only_text()) == []

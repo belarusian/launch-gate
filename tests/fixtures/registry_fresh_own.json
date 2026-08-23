@@ -1,0 +1,7 @@
+{
+  "project": "myproj",
+  "pid": "4242",
+  "endpoints": ["http://192.168.1.161:8080/v1"],
+  "outer_wall_seconds": 7200,
+  "launched_at": 1700000000
+}
