@@ -12,6 +12,8 @@ from pathlib import Path
 
 from launch_gate.prerequisites import GitState, check_prerequisites
 
+FIXTURES = Path(__file__).parent / "fixtures"
+
 # Fixed evidence lines for a present, non-empty runner prompt + gate log.
 _PROMPT_OK = "runner prompt present and non-empty: runner-prompt.md."
 _GATE_OK = "gate log present and non-empty: gate-log.md."
@@ -341,3 +343,42 @@ def test_file_matching_skips_subdirectories(tmp_path: Path) -> None:
     result = check_prerequisites(ai, tmp_path, git_state=_go_git(), tool_available=_no_tools)
     assert result.go is True
     assert result.lines[1] == "gate log present and non-empty: real-gate.md."
+
+
+# ---------------------------------------------------------------------------
+# Cycle 10 — gate-log dialect fixtures (Results table vs Area/Status table).
+# The prerequisites file-matching heuristic finds each as a gate log.
+# ---------------------------------------------------------------------------
+
+
+def _gate_log_fixture_text(name: str) -> str:
+    return (FIXTURES / name).read_text(encoding="utf-8")
+
+
+def test_gate_log_results_table_fixture_is_found(tmp_path: Path) -> None:
+    # The ### Results + | Check | Result | dialect fixture is non-empty and
+    # its name contains "gate", so the file-matching heuristic finds it as the
+    # gate log.
+    ai = tmp_path / "ai"
+    ai.mkdir()
+    (ai / "runner-prompt.md").write_text("prompt\n", encoding="utf-8")
+    (ai / "gate-log_results_table.md").write_text(
+        _gate_log_fixture_text("gate-log_results_table.md"), encoding="utf-8"
+    )
+    result = check_prerequisites(ai, tmp_path, git_state=_go_git(), tool_available=_no_tools)
+    assert result.go is True
+    assert result.lines[1] == "gate log present and non-empty: gate-log_results_table.md."
+
+
+def test_gate_log_area_status_fixture_is_found(tmp_path: Path) -> None:
+    # The | Area | Status | table dialect fixture is non-empty and its name
+    # contains "gate", so the file-matching heuristic finds it as the gate log.
+    ai = tmp_path / "ai"
+    ai.mkdir()
+    (ai / "runner-prompt.md").write_text("prompt\n", encoding="utf-8")
+    (ai / "gate-log_area_status.md").write_text(
+        _gate_log_fixture_text("gate-log_area_status.md"), encoding="utf-8"
+    )
+    result = check_prerequisites(ai, tmp_path, git_state=_go_git(), tool_available=_no_tools)
+    assert result.go is True
+    assert result.lines[1] == "gate log present and non-empty: gate-log_area_status.md."
