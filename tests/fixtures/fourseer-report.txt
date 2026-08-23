@@ -1,0 +1,6 @@
+# Per-Cycle Metrics (2 cycles)
+
+| Cycle | Outcome | Steps | Duration (s) | Trajectory |
+| --- | --- | --- | --- | --- |
+| 7 | exit:task_complete | 41 | 1358 | trajectory_0013.json |
+| 8 | exit:task_complete | 55 | - | trajectory_0014.json |
