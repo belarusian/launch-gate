@@ -488,3 +488,89 @@ def test_durations_from_fourseer_multiple_observed_rows() -> None:
         "| 9 | exit:task_complete | 60 | - | trajectory_0015.json |\n"
     )
     assert durations_from_fourseer(text) == [1358, 2000]
+
+
+# ---------------------------------------------------------------------------
+# Edge pins (n)-(q): artifact discovery subpaths, fourseer lexicographic
+# selection, fourseer row robustness, and the no-script + no-observations
+# conservative-default GO. Each asserts the returned path / value / exact lines.
+# ---------------------------------------------------------------------------
+
+
+def test_find_cycles_out_nested_ai_subpath(tmp_path: Path) -> None:
+    # (n) A ``cycles.out`` nested under ``ai_dir/ai/`` is discovered.
+    ai = tmp_path / "ai"
+    (ai / "ai").mkdir(parents=True)
+    (ai / "ai" / "cycles.out").write_text(_cycles_text(), encoding="utf-8")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    found = _find_cycles_out(ai, proj)
+    assert found == ai / "ai" / "cycles.out"
+
+
+def test_find_cycles_out_nested_project_subpath(tmp_path: Path) -> None:
+    # (n) A ``cycles.out`` nested under ``project_dir/ai/`` is discovered when
+    # the ``ai_dir`` has none.
+    ai = _empty_ai_dir(tmp_path)
+    proj = tmp_path / "proj"
+    (proj / "ai").mkdir(parents=True)
+    (proj / "ai" / "cycles.out").write_text(_cycles_text(), encoding="utf-8")
+    found = _find_cycles_out(ai, proj)
+    assert found == proj / "ai" / "cycles.out"
+
+
+def test_find_cycles_out_top_level_wins_over_nested_in_same_base(tmp_path: Path) -> None:
+    # (n) Within the same base, a top-level ``cycles.out`` wins over the
+    # nested ``ai/cycles.out`` (the top-level name is checked first).
+    ai = tmp_path / "ai"
+    (ai / "ai").mkdir(parents=True)
+    (ai / "cycles.out").write_text(_cycles_text(), encoding="utf-8")
+    (ai / "ai" / "cycles.out").write_text(_cycles_text(), encoding="utf-8")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    found = _find_cycles_out(ai, proj)
+    assert found == ai / "cycles.out"
+
+
+def test_find_fourseer_report_lexicographic_first_with_subdir(tmp_path: Path) -> None:
+    # (o) When several ``*fourseer*report*`` files exist (one in a nested
+    # subdir), the lexicographically-first full path wins. The nested
+    # ``aaa/fourseer-report.txt`` sorts before the top-level files.
+    ai = tmp_path / "ai"
+    (ai / "aaa").mkdir(parents=True)
+    (ai / "aaa" / "fourseer-report.txt").write_text(_fourseer_text(), encoding="utf-8")
+    (ai / "fourseer-report.txt").write_text(_fourseer_text(), encoding="utf-8")
+    (ai / "fourseer-report-2.txt").write_text(_fourseer_text(), encoding="utf-8")
+    found = _find_fourseer_report(ai)
+    assert found == ai / "aaa" / "fourseer-report.txt"
+
+
+def test_durations_from_fourseer_dash_steps_numeric_duration_is_kept() -> None:
+    # (p) A row whose Steps cell is a dash is kept when its Duration cell is
+    # numeric: the dash is in the Steps column, not the Duration column.
+    text = "| 7 | x | - | 1358 | t.json |\n"
+    assert durations_from_fourseer(text) == [1358]
+
+
+def test_durations_from_fourseer_trailing_extra_cell_is_tolerated() -> None:
+    # (p) A trailing extra cell after the Trajectory cell is tolerated; the
+    # Duration cell (4th) is still read.
+    text = "| 7 | x | 41 | 1358 | t.json | extra |\n"
+    assert durations_from_fourseer(text) == [1358]
+
+
+def test_q_no_script_no_observations_is_conservative_default_go(tmp_path: Path) -> None:
+    # (q) No ``--script`` and no observations (empty ``ai_dir``/``project_dir``)
+    # -> GO with the conservative-default note. This is the no-``--script``
+    # counterpart of case (c).
+    ai = _empty_ai_dir(tmp_path)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    result = check_wall_sizing(None, ai, proj)
+    assert result.go is True
+    assert result.lines == (
+        "no --script supplied; cannot parse the outer wall.",
+        "no observed inner-pass durations found "
+        "(no fourseer Duration, no cycles.out timestamps).",
+        "conservative default row applies; GO with no observations.",
+    )
