@@ -27,10 +27,12 @@ import argparse
 import os
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from launch_gate.checks import run_checks
 from launch_gate.models import Report
+from launch_gate.prerequisites import GitState
 from launch_gate.report import render_report
 
 
@@ -113,7 +115,12 @@ def _registry_dir() -> Path:
     return Path.home() / ".four" / "launches"
 
 
-def _run_check(args: argparse.Namespace, now: float) -> int:
+def _run_check(
+    args: argparse.Namespace,
+    now: float,
+    git_state: GitState | None = None,
+    tool_available: Callable[[str], bool] | None = None,
+) -> int:
     """Execute the ``check`` subcommand and return its exit code.
 
     Args:
@@ -121,6 +128,12 @@ def _run_check(args: argparse.Namespace, now: float) -> int:
         now: The current epoch (seconds). Supplied by the caller so the result
             is deterministic; ``time.time()`` is only called at the outermost
             :func:`run` entry.
+        git_state: An optional pre-collected :class:`GitState` for the
+            prerequisites check. When ``None``, it is collected from the project
+            dir (which shells out to ``git``). Supplying it keeps the check
+            deterministic and subprocess-free.
+        tool_available: An optional ``tool -> bool`` callable for the
+            prerequisites check's auxiliary-tool probe.
 
     Returns:
         ``0`` when all checks are GO, ``1`` when any is NO-GO.
@@ -156,6 +169,8 @@ def _run_check(args: argparse.Namespace, now: float) -> int:
         project_dir,
         ss_file=ss_file,
         driver_lineage=_driver_lineage(),
+        git_state=git_state,
+        tool_available=tool_available,
     )
 
     report = Report(tuple(header), checks)
@@ -163,7 +178,12 @@ def _run_check(args: argparse.Namespace, now: float) -> int:
     return 0 if report.all_go else 1
 
 
-def run(argv: list[str] | None = None, now: float | None = None) -> int:
+def run(
+    argv: list[str] | None = None,
+    now: float | None = None,
+    git_state: GitState | None = None,
+    tool_available: Callable[[str], bool] | None = None,
+) -> int:
     """Run the CLI and return a process exit code.
 
     Args:
@@ -176,6 +196,12 @@ def run(argv: list[str] | None = None, now: float | None = None) -> int:
             through :func:`launch_gate.checks.run_checks`. This keeps reports
             deterministic when a fixed ``now`` is supplied. There is no
             user-facing ``--now`` flag.
+        git_state: An optional pre-collected :class:`GitState` threaded to the
+            prerequisites check. When ``None`` (the default), it is collected
+            from the project dir (shelling out to ``git``). Supplying it keeps
+            the run deterministic and subprocess-free.
+        tool_available: An optional ``tool -> bool`` callable threaded to the
+            prerequisites check's auxiliary-tool probe.
 
     Returns:
         ``0`` when all checks are GO, ``1`` when any is NO-GO, and ``2`` on a
@@ -195,7 +221,7 @@ def run(argv: list[str] | None = None, now: float | None = None) -> int:
         return int(code)
 
     if args.command == "check":
-        return _run_check(args, now)
+        return _run_check(args, now, git_state=git_state, tool_available=tool_available)
 
     print(f"launch-gate: error: unknown subcommand {args.command!r}", file=sys.stderr)
     return 2
