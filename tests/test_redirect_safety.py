@@ -193,3 +193,19 @@ def test_non_seed_marker_dialect_is_not_a_marker() -> None:
         "launch line uses bare (>) redirect against an existing cycles.out.",
         "existing cycles.out has no cycle markers; treating as first-launch history.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Cycle 10 — cycles.out with only ``done`` markers (no start timestamps).
+# ---------------------------------------------------------------------------
+
+
+def _done_only_text() -> str:
+    return (FIXTURES / "cycles_out_done_only.out").read_text(encoding="utf-8")
+
+
+def test_has_cycle_markers_done_only_is_true() -> None:
+    # A ``done`` marker still matches the cycle-marker dialect (it carries
+    # ``========== CYCLE N``), so has_cycle_markers is True even though the
+    # file has no start timestamps.
+    assert has_cycle_markers(_done_only_text()) is True
