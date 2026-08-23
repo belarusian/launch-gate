@@ -47,9 +47,10 @@ def _redirect_to_cycles(launch_line: str) -> str | None:
     # An append redirect into cycles.out.
     if re.search(r">>\s*cycles\.out", launch_line):
         return "append"
-    # A bare (truncate) redirect into cycles.out. Match ``>`` not followed by
-    # another ``>`` and not part of ``2>``/``2>&1``.
-    if re.search(r"(?<!>)>\s*cycles\.out", launch_line):
+    # A bare (truncate) redirect into cycles.out. Match ``>`` not preceded by
+    # another ``>`` (an append) and not preceded by ``2`` (a stderr-only
+    # redirect like ``2> cycles.out`` is not a truncate of the stdout history).
+    if re.search(r"(?<![2>])>\s*cycles\.out", launch_line):
         return "truncate"
     return None
 
