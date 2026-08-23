@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "launch-gate"
+version = "0.1.0"
+description = "Deterministic, stdlib-only launch gate for four pipelines."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "launch-gate" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Environment :: Console",
+    "Operating System :: POSIX",
+]
+
+[project.scripts]
+launch-gate = "launch_gate.cli:main"
+
+[tool.setuptools]
+packages = ["launch_gate"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.mypy]
+ignore_missing_imports = true
+python_version = "3.10"
