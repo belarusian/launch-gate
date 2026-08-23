@@ -714,3 +714,112 @@ def test_non_numeric_wall_and_launched_at_coerce_to_defaults(tmp_path: Path) -> 
         f"target endpoints: {TARGET}.",
         f"NO-GO: other-pipeline holds {TARGET} (fresh, age 100s < wall 7200s, pid 4242).",
     )
+
+
+# ---------------------------------------------------------------------------
+# Cycle 10 — 2-LLM driver dialect (distinct FIVE_BASE_URL / FIVE_LARGE_URL).
+# ---------------------------------------------------------------------------
+
+
+def _two_llm_script_text() -> str:
+    return (FIXTURES / "driver_two_llm.sh").read_text(encoding="utf-8")
+
+
+def test_parse_endpoints_two_llm_fixture_returns_both_in_order() -> None:
+    # The committed 2-LLM fixture carries two distinct endpoints (different
+    # hosts); parse_endpoints must return both, in script order, no dedup.
+    assert parse_endpoints(_two_llm_script_text()) == [
+        "http://192.168.1.157:8080/v1",
+        "http://192.168.1.161:8081/v1",
+    ]
+
+
+def test_two_llm_fresh_foreign_registry_covers_only_first_endpoint(tmp_path: Path) -> None:
+    # A fresh-foreign registry entry that targets only the FIRST endpoint
+    # (157:8080) makes the registry verdict authoritative (covered), so the
+    # check is NO-GO naming the occupying project. The second endpoint
+    # (161:8081) is not separately evaluated because the registry was
+    # consulted; the verdict is the registry's.
+    reg = _write_registry(
+        tmp_path / "launches",
+        "other.json",
+        project="other-pipeline",
+        wall=7200,
+        mtime=NOW - 100,
+        endpoints=["http://192.168.1.157:8080/v1"],
+    )
+    result = check_endpoint_contention(
+        _two_llm_script_text(), reg, "myproj", NOW, driver_lineage={1, 2}
+    )
+    assert result.go is False
+    assert result.lines == (
+        "target endpoints: http://192.168.1.157:8080/v1, http://192.168.1.161:8081/v1.",
+        "NO-GO: other-pipeline holds http://192.168.1.157:8080/v1 "
+        "(fresh, age 100s < wall 7200s, pid 4242).",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Cycle 10 — committed registry fixtures (fresh-foreign, stale, fresh-own,
+# malformed), read from FIXTURES with a controlled mtime via os.utime.
+# ---------------------------------------------------------------------------
+
+
+def _copy_fixture_to_registry(reg_dir: Path, fixture_name: str, mtime: float) -> Path:
+    """Copy a committed registry fixture into ``reg_dir`` and set its mtime."""
+    reg_dir.mkdir(parents=True, exist_ok=True)
+    src = FIXTURES / fixture_name
+    dst = reg_dir / fixture_name
+    dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    os.utime(dst, (mtime, mtime))
+    return reg_dir
+
+
+def test_registry_fresh_foreign_fixture_is_no_go(tmp_path: Path) -> None:
+    # The committed fresh-foreign fixture (project other-pipeline, wall 7200)
+    # with a fresh mtime (age 100s) is a NO-GO naming the occupying project.
+    reg = _copy_fixture_to_registry(tmp_path / "launches", "registry_fresh_foreign.json", NOW - 100)
+    result = check_endpoint_contention(SCRIPT, reg, "myproj", NOW)
+    assert result.go is False
+    assert result.lines == (
+        f"target endpoints: {TARGET}.",
+        f"NO-GO: other-pipeline holds {TARGET} (fresh, age 100s < wall 7200s, pid 4242).",
+    )
+
+
+def test_registry_stale_fixture_is_go_with_note(tmp_path: Path) -> None:
+    # The committed stale fixture (wall 7200) with an mtime of age 8000s is
+    # stale (8000 >= 7200) -> GO with a note; not counted as contention.
+    reg = _copy_fixture_to_registry(tmp_path / "launches", "registry_stale.json", NOW - 8000)
+    result = check_endpoint_contention(SCRIPT, reg, "myproj", NOW)
+    assert result.go is True
+    assert result.lines == (
+        f"target endpoints: {TARGET}.",
+        f"registry other-pipeline targets {TARGET} but is stale "
+        f"(age 8000s >= wall 7200s); not counted.",
+    )
+
+
+def test_registry_fresh_own_fixture_is_go_not_contention(tmp_path: Path) -> None:
+    # The committed fresh-own fixture (project myproj, wall 7200) with a fresh
+    # mtime (age 100s) is fresh but is THIS project -> GO, not contention.
+    reg = _copy_fixture_to_registry(tmp_path / "launches", "registry_fresh_own.json", NOW - 100)
+    result = check_endpoint_contention(SCRIPT, reg, "myproj", NOW)
+    assert result.go is True
+    assert result.lines == (
+        f"target endpoints: {TARGET}.",
+        "registry myproj is fresh but is this project; not contention.",
+    )
+
+
+def test_registry_malformed_fixture_is_skipped_without_crash(tmp_path: Path) -> None:
+    # The committed malformed fixture is not valid JSON -> the file is skipped
+    # (not counted as occupancy); no crash, no false NO-GO.
+    reg = _copy_fixture_to_registry(tmp_path / "launches", "registry_malformed.json", NOW - 100)
+    result = check_endpoint_contention(SCRIPT, reg, "myproj", NOW)
+    assert result.go is True
+    assert result.lines == (
+        f"target endpoints: {TARGET}.",
+        "registry file registry_malformed.json is malformed; "
+        "skipped (not counted as occupancy).",
+    )
