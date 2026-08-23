@@ -526,3 +526,191 @@ def test_no_five_endpoints_is_go_with_no_occupancy_note(tmp_path: Path) -> None:
         "no FIVE_* endpoint URLs found in the driver script.",
         "no target endpoints to check; GO with no occupancy data.",
     )
+
+
+# ---------------------------------------------------------------------------
+# (l) multi-endpoint overlap: two distinct FIVE_* endpoints; a fresh-foreign
+#     registry covering only ONE drives the verdict, the uncovered one is not
+#     dropped (still listed in the target-endpoints line).
+# ---------------------------------------------------------------------------
+
+TARGET2 = "http://192.168.1.162:9000/v1"
+SCRIPT_TWO = (
+    f'export FIVE_BASE_URL="${{FIVE_BASE_URL:-{TARGET}}}"\n'
+    f'export FIVE_LARGE_URL="${{FIVE_LARGE_URL:-{TARGET2}}}"\n'
+)
+
+
+def test_multi_endpoint_overlap_one_covered_drives_verdict(tmp_path: Path) -> None:
+    # A fresh-foreign registry covering only TARGET (one of two) is NO-GO; the
+    # uncovered TARGET2 is not dropped from the target-endpoints line.
+    reg = _write_registry(
+        tmp_path / "launches", "other.json", "other-pipeline", 7200, NOW - 100,
+        endpoints=[TARGET],
+    )
+    result = check_endpoint_contention(SCRIPT_TWO, reg, "myproj", NOW)
+    assert result.go is False
+    assert result.lines == (
+        f"target endpoints: {TARGET}, {TARGET2}.",
+        f"NO-GO: other-pipeline holds {TARGET} (fresh, age 100s < wall 7200s, pid 4242).",
+    )
+
+
+# ---------------------------------------------------------------------------
+# (m) bracketed / bare IPv6 canonical host:port (endpoint_hostport must match
+#     parse_ss so the socket-overlap test matches; endpoint_hostport is total).
+# ---------------------------------------------------------------------------
+
+def _ss_ipv6_text() -> str:
+    return (FIXTURES / "ss_estab_ipv6.txt").read_text(encoding="utf-8")
+
+
+def test_endpoint_hostport_bracketed_ipv6_keeps_brackets() -> None:
+    # urlparse would strip the brackets (-> ::1:8080); the canonical form keeps
+    # them so it matches parse_ss.
+    assert endpoint_hostport("http://[::1]:8080/v1") == "[::1]:8080"
+
+
+def test_endpoint_hostport_bare_ipv6_is_bracketed_and_total() -> None:
+    # urlparse raises ValueError on a bare-IPv6 netloc; endpoint_hostport is
+    # total and canonicalizes to the bracketed form.
+    assert endpoint_hostport("http://::1:8080/v1") == "[::1]:8080"
+
+
+def test_endpoint_hostport_bracketed_ipv6_default_port() -> None:
+    assert endpoint_hostport("http://[::1]/v1") == "[::1]:80"
+
+
+def test_parse_ss_bracketed_ipv6_estab() -> None:
+    lines = parse_ss(_ss_ipv6_text())
+    assert lines[0] == ec.SocketLine(local_hostport="[::1]:8080", pid=4242, process="python3")
+
+
+def test_endpoint_hostport_matches_parse_ss_for_bracketed_ipv6() -> None:
+    # The canonical host:port of the endpoint equals the local host:port parse_ss
+    # yields for a matching ESTAB line, so the overlap test matches.
+    assert endpoint_hostport("http://[::1]:8080/v1") == parse_ss(_ss_ipv6_text())[0].local_hostport
+
+
+def test_bracketed_ipv6_foreign_socket_line_is_no_go(tmp_path: Path) -> None:
+    # A bracketed-IPv6 foreign socket line is NO-GO (not a false GO from a
+    # bracket-stripping mismatch).
+    script = 'export FIVE_BASE_URL="${FIVE_BASE_URL:-http://[::1]:8080/v1}"\n'
+    reg = _empty_registry(tmp_path)
+    ss = _ss_file(tmp_path, _ss_ipv6_text())
+    result = check_endpoint_contention(
+        script, reg, "myproj", NOW, ss_file=ss, driver_lineage={1, 2}
+    )
+    assert result.go is False
+    assert result.lines == (
+        "target endpoints: http://[::1]:8080/v1.",
+        f"launch-registry directory {reg} is empty.",
+        "no registry coverage for the target endpoints; falling back to socket snapshot.",
+        "socket snapshot read from --ss-file snap.txt.",
+        "NO-GO: established connection on [::1]:8080 owned by pid 4242 (python3), "
+        "outside the checked driver's lineage.",
+    )
+
+
+def test_bare_ipv6_endpoint_returns_verdict_without_exception(tmp_path: Path) -> None:
+    # A bare-IPv6 endpoint canonicalizes to [::1]:8080 and matches the socket
+    # line; the check returns a verdict (no ValueError from urlparse).
+    script = 'export FIVE_BASE_URL="${FIVE_BASE_URL:-http://::1:8080/v1}"\n'
+    reg = _empty_registry(tmp_path)
+    ss = _ss_file(tmp_path, _ss_ipv6_text())
+    result = check_endpoint_contention(
+        script, reg, "myproj", NOW, ss_file=ss, driver_lineage={1, 2}
+    )
+    assert result.go is False
+    assert result.lines == (
+        "target endpoints: http://::1:8080/v1.",
+        f"launch-registry directory {reg} is empty.",
+        "no registry coverage for the target endpoints; falling back to socket snapshot.",
+        "socket snapshot read from --ss-file snap.txt.",
+        "NO-GO: established connection on [::1]:8080 owned by pid 4242 (python3), "
+        "outside the checked driver's lineage.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# (n) non-list `endpoints` field (string / number / null) -> ignored, no crash.
+# ---------------------------------------------------------------------------
+
+
+def test_non_list_endpoints_field_is_ignored_without_crash(tmp_path: Path) -> None:
+    for i, value in enumerate(("http://192.168.1.161:8080/v1", 8080, None)):
+        reg = tmp_path / f"launches_{i}"
+        reg.mkdir(parents=True)
+        f = reg / "other.json"
+        f.write_text(
+            json.dumps(
+                {
+                    "project": "other-pipeline",
+                    "pid": "4242",
+                    "endpoints": value,
+                    "outer_wall_seconds": 7200,
+                    "launched_at": 1_699_000_000,
+                }
+            ),
+            encoding="utf-8",
+        )
+        os.utime(f, (NOW - 100, NOW - 100))
+        result = check_endpoint_contention(SCRIPT, reg, "myproj", NOW)
+        assert result.go is True
+        assert result.lines == (
+            f"target endpoints: {TARGET}.",
+            "registry other-pipeline does not target a checked endpoint; ignored.",
+        )
+
+
+# ---------------------------------------------------------------------------
+# (o) outer_wall_seconds / launched_at coercion defaults (missing / non-numeric
+#     -> 7200 and 0); freshness uses mtime + coerced wall, NOT launched_at.
+# ---------------------------------------------------------------------------
+
+
+def test_missing_wall_and_launched_at_coerce_and_freshness_uses_mtime(tmp_path: Path) -> None:
+    # outer_wall_seconds and launched_at are both absent -> coerced to 7200 and
+    # 0. Freshness is judged from mtime (age 100s < wall 7200s), NOT from
+    # launched_at (which is 0 and would otherwise read as stale).
+    reg = tmp_path / "launches"
+    reg.mkdir(parents=True)
+    f = reg / "other.json"
+    f.write_text(
+        json.dumps({"project": "other-pipeline", "pid": "4242", "endpoints": [TARGET]}),
+        encoding="utf-8",
+    )
+    os.utime(f, (NOW - 100, NOW - 100))
+    result = check_endpoint_contention(SCRIPT, reg, "myproj", NOW)
+    assert result.go is False
+    assert result.lines == (
+        f"target endpoints: {TARGET}.",
+        f"NO-GO: other-pipeline holds {TARGET} (fresh, age 100s < wall 7200s, pid 4242).",
+    )
+
+
+def test_non_numeric_wall_and_launched_at_coerce_to_defaults(tmp_path: Path) -> None:
+    # Non-numeric outer_wall_seconds / launched_at -> coerced to 7200 / 0; the
+    # entry is still judged fresh from mtime.
+    reg = tmp_path / "launches"
+    reg.mkdir(parents=True)
+    f = reg / "other.json"
+    f.write_text(
+        json.dumps(
+            {
+                "project": "other-pipeline",
+                "pid": "4242",
+                "endpoints": [TARGET],
+                "outer_wall_seconds": "abc",
+                "launched_at": "xyz",
+            }
+        ),
+        encoding="utf-8",
+    )
+    os.utime(f, (NOW - 100, NOW - 100))
+    result = check_endpoint_contention(SCRIPT, reg, "myproj", NOW)
+    assert result.go is False
+    assert result.lines == (
+        f"target endpoints: {TARGET}.",
+        f"NO-GO: other-pipeline holds {TARGET} (fresh, age 100s < wall 7200s, pid 4242).",
+    )
