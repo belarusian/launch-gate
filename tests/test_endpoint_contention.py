@@ -334,3 +334,195 @@ def test_no_occupancy_data_is_go(tmp_path: Path) -> None:
         "no socket snapshot available (no live ss, no --ss-file).",
         "no occupancy data (no registry, no socket snapshot); GO with no occupancy data.",
     )
+
+
+# ---------------------------------------------------------------------------
+# (h) --ss-file precedence: readable ss_file used, live ss NOT consulted;
+#     ss_file None / not-a-file falls back to live ss (patched run_ss).
+# ---------------------------------------------------------------------------
+
+
+def _ss_two_pids_text() -> str:
+    return (FIXTURES / "ss_estab_two_pids.txt").read_text(encoding="utf-8")
+
+
+def test_ss_file_readable_is_used_and_live_ss_not_consulted(tmp_path: Path) -> None:
+    reg = _empty_registry(tmp_path)
+    ss = _ss_file(tmp_path, _ss_foreign_text())
+    with mock.patch.object(ec, "run_ss", return_value="SHOULD_NOT_APPEAR") as m:
+        result = check_endpoint_contention(
+            SCRIPT, reg, "myproj", NOW, ss_file=ss, driver_lineage={1, 2}
+        )
+    assert m.called is False
+    assert result.go is False
+    assert result.lines == (
+        f"target endpoints: {TARGET}.",
+        f"launch-registry directory {reg} is empty.",
+        "no registry coverage for the target endpoints; falling back to socket snapshot.",
+        "socket snapshot read from --ss-file snap.txt.",
+        f"NO-GO: established connection on {HOSTPORT} owned by pid 4242 (python3), "
+        "outside the checked driver's lineage.",
+        f"established connection on {HOSTPORT} with no attributable pid; "
+        "cannot confirm foreign ownership; not counted.",
+    )
+
+
+def test_ss_file_none_falls_back_to_live_ss(tmp_path: Path) -> None:
+    reg = _empty_registry(tmp_path)
+    with mock.patch.object(ec, "run_ss", return_value=_ss_foreign_text()) as m:
+        result = check_endpoint_contention(SCRIPT, reg, "myproj", NOW, driver_lineage={1, 2})
+    assert m.called is True
+    assert result.go is False
+    assert result.lines == (
+        f"target endpoints: {TARGET}.",
+        f"launch-registry directory {reg} is empty.",
+        "no registry coverage for the target endpoints; falling back to socket snapshot.",
+        "socket snapshot read from live `ss -tnp`.",
+        f"NO-GO: established connection on {HOSTPORT} owned by pid 4242 (python3), "
+        "outside the checked driver's lineage.",
+        f"established connection on {HOSTPORT} with no attributable pid; "
+        "cannot confirm foreign ownership; not counted.",
+    )
+
+
+def test_ss_file_not_a_file_falls_back_to_live_ss(tmp_path: Path) -> None:
+    reg = _empty_registry(tmp_path)
+    missing = tmp_path / "does-not-exist.txt"
+    with mock.patch.object(ec, "run_ss", return_value=_ss_foreign_text()) as m:
+        result = check_endpoint_contention(
+            SCRIPT, reg, "myproj", NOW, ss_file=missing, driver_lineage={1, 2}
+        )
+    assert m.called is True
+    assert result.go is False
+    assert result.lines == (
+        f"target endpoints: {TARGET}.",
+        f"launch-registry directory {reg} is empty.",
+        "no registry coverage for the target endpoints; falling back to socket snapshot.",
+        "socket snapshot read from live `ss -tnp`.",
+        f"NO-GO: established connection on {HOSTPORT} owned by pid 4242 (python3), "
+        "outside the checked driver's lineage.",
+        f"established connection on {HOSTPORT} with no attributable pid; "
+        "cannot confirm foreign ownership; not counted.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# (i) pid-lineage attribution edges: multi-ESTAB foreign wins; empty lineage
+#     set = every attributable pid foreign; driver_lineage=None = empty set.
+# ---------------------------------------------------------------------------
+
+
+def test_multi_estab_lineage_and_foreign_is_no_go_foreign_wins(tmp_path: Path) -> None:
+    reg = _empty_registry(tmp_path)
+    ss = _ss_file(tmp_path, _ss_two_pids_text())
+    result = check_endpoint_contention(
+        SCRIPT, reg, "myproj", NOW, ss_file=ss, driver_lineage={4242}
+    )
+    assert result.go is False
+    assert result.lines == (
+        f"target endpoints: {TARGET}.",
+        f"launch-registry directory {reg} is empty.",
+        "no registry coverage for the target endpoints; falling back to socket snapshot.",
+        "socket snapshot read from --ss-file snap.txt.",
+        f"established connection on {HOSTPORT} owned by driver lineage (pid 4242); not contention.",
+        f"NO-GO: established connection on {HOSTPORT} owned by pid 9999 (node), "
+        "outside the checked driver's lineage.",
+    )
+
+
+def test_empty_driver_lineage_set_marks_every_pid_foreign(tmp_path: Path) -> None:
+    reg = _empty_registry(tmp_path)
+    ss = _ss_file(tmp_path, _ss_two_pids_text())
+    result = check_endpoint_contention(SCRIPT, reg, "myproj", NOW, ss_file=ss, driver_lineage=set())
+    assert result.go is False
+    assert result.lines == (
+        f"target endpoints: {TARGET}.",
+        f"launch-registry directory {reg} is empty.",
+        "no registry coverage for the target endpoints; falling back to socket snapshot.",
+        "socket snapshot read from --ss-file snap.txt.",
+        f"NO-GO: established connection on {HOSTPORT} owned by pid 4242 (python3), "
+        "outside the checked driver's lineage.",
+        f"NO-GO: established connection on {HOSTPORT} owned by pid 9999 (node), "
+        "outside the checked driver's lineage.",
+    )
+
+
+def test_driver_lineage_none_default_behaves_as_empty_set(tmp_path: Path) -> None:
+    reg = _empty_registry(tmp_path)
+    ss = _ss_file(tmp_path, _ss_two_pids_text())
+    result = check_endpoint_contention(SCRIPT, reg, "myproj", NOW, ss_file=ss)
+    assert result.go is False
+    assert result.lines == (
+        f"target endpoints: {TARGET}.",
+        f"launch-registry directory {reg} is empty.",
+        "no registry coverage for the target endpoints; falling back to socket snapshot.",
+        "socket snapshot read from --ss-file snap.txt.",
+        f"NO-GO: established connection on {HOSTPORT} owned by pid 4242 (python3), "
+        "outside the checked driver's lineage.",
+        f"NO-GO: established connection on {HOSTPORT} owned by pid 9999 (node), "
+        "outside the checked driver's lineage.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# (j) registry `covered` semantics: non-empty registry dir is authoritative,
+#     socket fallback SKIPPED entirely (no run_ss call, no fallback line).
+# ---------------------------------------------------------------------------
+
+
+def test_fresh_foreign_registry_covered_skips_socket_fallback(tmp_path: Path) -> None:
+    reg = _write_registry(tmp_path / "launches", "other.json", "other-pipeline", 7200, NOW - 100)
+    ss = _ss_file(tmp_path, _ss_foreign_text())
+    with mock.patch.object(ec, "run_ss", return_value="SHOULD_NOT_APPEAR") as m:
+        result = check_endpoint_contention(
+            SCRIPT, reg, "myproj", NOW, ss_file=ss, driver_lineage={1, 2}
+        )
+    assert m.called is False
+    assert result.go is False
+    assert result.lines == (
+        f"target endpoints: {TARGET}.",
+        f"NO-GO: other-pipeline holds {TARGET} (fresh, age 100s < wall 7200s, pid 4242).",
+    )
+
+
+def test_stale_only_registry_covered_is_go_with_no_socket_line(tmp_path: Path) -> None:
+    reg = _write_registry(tmp_path / "launches", "other.json", "other-pipeline", 7200, NOW - 10_000)
+    ss = _ss_file(tmp_path, _ss_foreign_text())
+    with mock.patch.object(ec, "run_ss", return_value="SHOULD_NOT_APPEAR") as m:
+        result = check_endpoint_contention(
+            SCRIPT, reg, "myproj", NOW, ss_file=ss, driver_lineage={1, 2}
+        )
+    assert m.called is False
+    assert result.go is True
+    assert result.lines == (
+        f"target endpoints: {TARGET}.",
+        f"registry other-pipeline targets {TARGET} but is stale "
+        "(age 10000s >= wall 7200s); not counted.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# (k) no --script / no FIVE_* endpoints = GO with honest no-occupancy note
+#     (no registry/socket scan at all).
+# ---------------------------------------------------------------------------
+
+
+def test_no_script_is_go_with_no_occupancy_note(tmp_path: Path) -> None:
+    reg = _empty_registry(tmp_path)
+    result = check_endpoint_contention(None, reg, "myproj", NOW)
+    assert result.go is True
+    assert result.lines == (
+        "no --script supplied; cannot parse target endpoints.",
+        "no occupancy data to check; GO with no occupancy data.",
+    )
+
+
+def test_no_five_endpoints_is_go_with_no_occupancy_note(tmp_path: Path) -> None:
+    reg = _empty_registry(tmp_path)
+    script = 'export FIVE_MODEL="${FIVE_MODEL:-local-model}"\n'
+    result = check_endpoint_contention(script, reg, "myproj", NOW)
+    assert result.go is True
+    assert result.lines == (
+        "no FIVE_* endpoint URLs found in the driver script.",
+        "no target endpoints to check; GO with no occupancy data.",
+    )
