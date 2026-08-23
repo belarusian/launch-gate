@@ -64,7 +64,10 @@ script that invocation runs.
      honest "cannot confirm foreign ownership" note. With multiple
      established lines on a target port, a single foreign pid makes it
      NO-GO (the foreign one wins). An empty lineage set (or the `None`
-     default) treats every attributable pid as foreign.
+     default) treats every attributable pid as foreign. The target
+     `host:port` is canonicalized (IPv6 hosts bracketed, e.g.
+     `[::1]:8080`; a bare-IPv6 endpoint is canonicalized the same way)
+     so it matches the socket line's local address.
    - **No occupancy data** — no registry coverage and no socket snapshot
      (no live `ss`, no `--ss-file`) is GO with an explicit "no occupancy
      data" note.
