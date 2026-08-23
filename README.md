@@ -38,8 +38,36 @@ script that invocation runs.
    The marker dialect is the seed's `========== CYCLE N  <utc> ==========`
    (4+ equals, `CYCLE`, a number); a `========== CYCLE N done ==========`
    line also counts. Whitespace between `>` and `cycles.out` is tolerated.
-2. **endpoint-contention** — via the launch-registry (below), with a socket
-   snapshot fallback. Never guesses occupancy.
+2. **endpoint-contention** — never guesses occupancy; every verdict is
+   backed by a concrete source (a registry entry or a socket line) or an
+   explicit "no occupancy data" note. The classification matrix:
+   - **Endpoint parse** — the target endpoints are the `FIVE_*` URL(s)
+     parsed out of the `--script` driver (trailing `}`/`"`/punctuation
+     stripped, de-duplicated, order-preserving). With no `--script`
+     (`script_text=None`) or a script with no `FIVE_*` URLs, the check is
+     GO with an honest "no occupancy data" note and no registry/socket
+     scan at all.
+   - **Registry scan (authoritative)** — scans `~/.four/launches/*.json`.
+     A **fresh** entry (mtime within its own `outer_wall_seconds`, default
+     7200) that lists a target endpoint and belongs to a *different*
+     project is NO-GO (naming the occupying project); a fresh entry for
+     *this* project is GO (not contention); a **stale** entry (age >= wall)
+     is GO with a note; a malformed file is skipped (not counted). When the
+     registry dir is non-empty, its verdict is **authoritative** and the
+     socket fallback is skipped entirely (no `ss` call).
+   - **Socket fallback** — only when the registry does not cover the target
+     endpoints. The snapshot is a readable `--ss-file` when supplied, else
+     live `ss -tnp` (the `--ss-file` is never consulted when it is not a
+     file). An established connection on a target `host:port` owned by a pid
+     **outside** the checked driver's lineage is NO-GO; a pid in the lineage
+     is GO (not contention); a line with no attributable pid is GO with an
+     honest "cannot confirm foreign ownership" note. With multiple
+     established lines on a target port, a single foreign pid makes it
+     NO-GO (the foreign one wins). An empty lineage set (or the `None`
+     default) treats every attributable pid as foreign.
+   - **No occupancy data** — no registry coverage and no socket snapshot
+     (no live `ss`, no `--ss-file`) is GO with an explicit "no occupancy
+     data" note.
 3. **wall-sizing (B1)** — `outer_wall >= 3 * max_observed` inner-pass duration.
 4. **prerequisites** — verifies the launch prerequisites:
    - a runner prompt and a gate log exist and are non-empty in `ai/`
