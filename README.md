@@ -71,7 +71,12 @@ script that invocation runs.
    - **No occupancy data** — no registry coverage and no socket snapshot
      (no live `ss`, no `--ss-file`) is GO with an explicit "no occupancy
      data" note.
-3. **wall-sizing (B1)** — `outer_wall >= 3 * max_observed` inner-pass duration.
+3. **wall-sizing (B1)** — the outer wall (the `perl -e 'alarm shift; exec @ARGV' <wall>` seconds) must be large enough to contain the inner passes. Observed inner-pass durations come from two sources, combined:
+   - **fourseer report** — the `Duration (s)` column (the 4th cell of each Per-Cycle Metrics row); a `-` in that cell means no observation and the row is skipped.
+   - **`cycles.out`** — the gap between consecutive `========== CYCLE N  <utc> ==========` start markers approximates that cycle's wall time; fewer than two start markers yields no durations.
+   - **Verdict** — with observations, `outer_wall >= 3 * max_observed` is GO, else NO-GO (naming the required `3 * max_observed` value).
+   - **Observations but no outer wall** — no `--script` (or a script with no perl-alarm wall) means there is no outer wall to compare against -> NO-GO ("cannot verify sizing").
+   - **No observations** — GO with a note that the conservative default row applies.
 4. **prerequisites** — verifies the launch prerequisites:
    - a runner prompt and a gate log exist and are non-empty in `ai/`
      (found by a substring match over the directory: `runner-prompt`/`runner`
