@@ -195,7 +195,8 @@ def check_prerequisites(
             else:
                 go = False
                 lines.append(
-                    f"NO-GO: main out of sync with origin/main (ahead={state.ahead} behind={state.behind})."
+                    f"NO-GO: main out of sync with origin/main "
+                    f"(ahead={state.ahead} behind={state.behind})."
                 )
         else:
             lines.append("no origin/main remote; sync check skipped (note).")

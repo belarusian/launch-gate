@@ -21,7 +21,7 @@ classifiers = [
 launch-gate = "launch_gate.cli:main"
 
 [tool.setuptools]
-packages = ["launch_gate"]
+packages = ["launch_gate", "launch_gate.checks"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

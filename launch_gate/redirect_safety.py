@@ -69,7 +69,7 @@ def check_redirect_safety(launch_line: str, cycles_out_text: str | None) -> Chec
     lines: list[str] = []
     redirect = _redirect_to_cycles(launch_line)
     history_exists = cycles_out_text is not None
-    has_markers = has_cycle_markers(cycles_out_text) if history_exists else False
+    has_markers = has_cycle_markers(cycles_out_text) if cycles_out_text is not None else False
 
     if redirect is None:
         lines.append("launch line does not redirect into cycles.out; nothing to gate.")

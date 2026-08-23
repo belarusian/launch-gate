@@ -104,7 +104,7 @@ def durations_from_cycles_out(text: str) -> list[int]:
             h, mi, s = int(m.group(1)), int(m.group(2)), int(m.group(3))
             stamps.append(h * 3600 + mi * 60 + s)
     durations: list[int] = []
-    for a, b in zip(stamps, stamps[1:]):
+    for a, b in zip(stamps, stamps[1:], strict=False):
         durations.append(b - a)
     return durations
 
@@ -179,7 +179,10 @@ def check_wall_sizing(
             observations.extend(durs)
             source_notes.append(f"fourseer report {fourseer_path.name}: {len(durs)} duration(s).")
         else:
-            source_notes.append(f"fourseer report {fourseer_path.name}: no Duration (s) observations.")
+            source_notes.append(
+                f"fourseer report {fourseer_path.name}: "
+                f"no Duration (s) observations."
+            )
 
     cycles_path = _find_cycles_out(ai_dir, project_dir)
     if cycles_path is not None:
@@ -212,7 +215,10 @@ def check_wall_sizing(
         return CheckResult("wall-sizing", False, tuple(lines))
 
     # No observations.
-    lines.append("no observed inner-pass durations found (no fourseer Duration, no cycles.out timestamps).")
+    lines.append(
+        "no observed inner-pass durations found "
+        "(no fourseer Duration, no cycles.out timestamps)."
+    )
     for note in source_notes:
         lines.append(f"source: {note}")
     lines.append("conservative default row applies; GO with no observations.")

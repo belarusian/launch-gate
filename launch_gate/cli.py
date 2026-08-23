@@ -29,12 +29,9 @@ import sys
 import time
 from pathlib import Path
 
-from launch_gate.endpoint_contention import check_endpoint_contention
-from launch_gate.models import CheckResult, Report
-from launch_gate.prerequisites import check_prerequisites
-from launch_gate.redirect_safety import check_redirect_safety
+from launch_gate.checks import run_checks
+from launch_gate.models import Report
 from launch_gate.report import render_report
-from launch_gate.wall_sizing import check_wall_sizing
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -116,11 +113,14 @@ def _registry_dir() -> Path:
     return Path.home() / ".four" / "launches"
 
 
-def _run_check(args: argparse.Namespace) -> int:
+def _run_check(args: argparse.Namespace, now: float) -> int:
     """Execute the ``check`` subcommand and return its exit code.
 
     Args:
         args: The parsed ``check`` subcommand namespace.
+        now: The current epoch (seconds). Supplied by the caller so the result
+            is deterministic; ``time.time()`` is only called at the outermost
+            :func:`run` entry.
 
     Returns:
         ``0`` when all checks are GO, ``1`` when any is NO-GO.
@@ -134,7 +134,6 @@ def _run_check(args: argparse.Namespace) -> int:
     cycles_path = _find_cycles_out(project_dir, ai_dir)
     cycles_text = _read_text(cycles_path)
     ss_file = Path(args.ss_file) if args.ss_file else None
-    now = time.time()
 
     # Header: what was checked, sources read.
     header: list[str] = []
@@ -146,39 +145,46 @@ def _run_check(args: argparse.Namespace) -> int:
     header.append(f"ss file: {ss_file if ss_file else '(none supplied)'}")
     header.append(f"registry dir: {_registry_dir()}")
 
-    checks: list[CheckResult] = []
-    checks.append(check_redirect_safety(args.launch_line, cycles_text))
-    checks.append(
-        check_endpoint_contention(
-            script_text,
-            _registry_dir(),
-            project_name,
-            now,
-            ss_file=ss_file,
-            driver_lineage=_driver_lineage(),
-        )
+    checks = run_checks(
+        args.launch_line,
+        cycles_text,
+        script_text,
+        _registry_dir(),
+        project_name,
+        now,
+        ai_dir,
+        project_dir,
+        ss_file=ss_file,
+        driver_lineage=_driver_lineage(),
     )
-    checks.append(check_wall_sizing(script_text, ai_dir, project_dir))
-    checks.append(check_prerequisites(ai_dir, project_dir))
 
-    report = Report(tuple(header), tuple(checks))
+    report = Report(tuple(header), checks)
     print(render_report(report))
     return 0 if report.all_go else 1
 
 
-def run(argv: list[str] | None = None) -> int:
+def run(argv: list[str] | None = None, now: float | None = None) -> int:
     """Run the CLI and return a process exit code.
 
     Args:
         argv: Command-line arguments (without the program name). When ``None``,
             ``sys.argv[1:]`` is used. The first token must be a subcommand
             (currently only ``check``).
+        now: An internal, non-user-facing epoch (seconds) used for registry
+            freshness math. When ``None`` (the default), ``time.time()`` is
+            called here — the single outermost entry point — and threaded
+            through :func:`launch_gate.checks.run_checks`. This keeps reports
+            deterministic when a fixed ``now`` is supplied. There is no
+            user-facing ``--now`` flag.
 
     Returns:
         ``0`` when all checks are GO, ``1`` when any is NO-GO, and ``2`` on a
         usage error. In the error case an error message is written to stderr and
         no exception escapes :func:`run`.
     """
+    if now is None:
+        now = time.time()
+
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
@@ -189,7 +195,7 @@ def run(argv: list[str] | None = None) -> int:
         return int(code)
 
     if args.command == "check":
-        return _run_check(args)
+        return _run_check(args, now)
 
     print(f"launch-gate: error: unknown subcommand {args.command!r}", file=sys.stderr)
     return 2

@@ -11,6 +11,7 @@ Exit-code contract:
     2 = usage error
 """
 
+from launch_gate.checks import Check, run_checks
 from launch_gate.endpoint_contention import (
     RegistryEntry,
     SocketLine,
@@ -36,7 +37,9 @@ from launch_gate.wall_sizing import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "Check",
     "CheckResult",
+    "run_checks",
     "Report",
     "RegistryEntry",
     "SocketLine",
