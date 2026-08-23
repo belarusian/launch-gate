@@ -108,7 +108,7 @@ it via `trap ... EXIT`. The canonical bash block:
     mkdir -p "$REG_DIR"
     write_registry() {
       cat > "$REG_FILE" <<JSON
-    {"project": "$(basename "$PROJ")", "pid": $$, "endpoints": ["$FIVE_BASE_URL", "$FIVE_LARGE_URL"], "outer_wall_seconds": $OUTER_WALL, "launched_at": $(date +%s)}
+    {"project": "$(basename "$PROJ")", "pid": "$$", "endpoints": ["$FIVE_BASE_URL", "$FIVE_LARGE_URL"], "outer_wall_seconds": $OUTER_WALL, "launched_at": $(date +%s)}
     JSON
     }
     write_registry
