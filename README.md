@@ -87,6 +87,41 @@ script that invocation runs.
    - `fourseer` / `spoke_lint` / `loop_doctor` are probed in that fixed order
      and reported honestly as importable (verdict folded in) or not available.
 
+## Report layout
+
+The report is a deterministic, byte-stable multi-line string with three parts:
+
+1. **Header block** — the title, a `=` rule, the header lines (what was
+   checked, sources read), and a blank line.
+2. **Per-check verdict table** — a `per-check verdicts` title, a `-` rule, then
+   one row per check (name left-justified to 20 columns + the `GO`/`NO-GO`
+   token) with each evidence line indented four spaces, and a closing `-` rule.
+3. **Final line** — `ALL-GO` when every check is GO, else `NO-GO`.
+
+A representative snippet (a NO-GO on endpoint-contention):
+
+    launch-gate report
+    ========================================
+    launch line: nohup ./run.sh 3 4 >> cycles.out 2>&1 &
+    project dir: /home/u/proj (project 'proj')
+
+    per-check verdicts
+    ----------------------------------------
+    redirect-safety      GO
+        launch line appends (>>) to cycles.out.
+    endpoint-contention  NO-GO
+        target endpoints: http://192.168.1.161:8080/v1.
+        NO-GO: other holds http://192.168.1.161:8080/v1 (fresh, age 12s < wall 7200s, pid 4242).
+    wall-sizing          GO
+        outer wall (perl alarm): 21600s.
+    prerequisites        GO
+        on branch main.
+    ----------------------------------------
+    NO-GO
+
+The exact bytes are pinned by the golden tests (`tests/test_golden_report.py`);
+the layout widths are named constants in `launch_gate/report.py`.
+
 ## Canonical launch-registry block (every four driver must carry)
 
 Each four driver writes a heartbeat registry file at launch and removes it on
