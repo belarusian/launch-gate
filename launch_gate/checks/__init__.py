@@ -6,11 +6,19 @@ This package is the **orchestration** layer. It bundles the four named checks
 deterministic path. It also re-exports the
 :class:`~launch_gate.models.CheckResult` value object under the short name
 :data:`Check`.
+
+The package exposes a machine-readable contract for the orchestration result:
+
+- :data:`CHECK_ORDER` — the four stable check names, in the exact order
+  :func:`run_checks` returns them.
+- :func:`verdict_of` — a pure predicate returning ``True`` iff every check in a
+  result tuple is GO (the all-GO verdict). It mirrors
+  :attr:`launch_gate.models.Report.all_go`.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from launch_gate.endpoint_contention import check_endpoint_contention
@@ -22,11 +30,42 @@ from launch_gate.wall_sizing import check_wall_sizing
 #: The per-check result value object, re-exported under a short name.
 Check = CheckResult
 
+#: The four stable check names, in the exact order :func:`run_checks` returns
+#: them. This is the authoritative ordering contract for the orchestration
+#: result and the report's per-check table rows.
+CHECK_ORDER: tuple[str, ...] = (
+    "redirect-safety",
+    "endpoint-contention",
+    "wall-sizing",
+    "prerequisites",
+)
+
 __all__ = [
     "Check",
     "CheckResult",
+    "CHECK_ORDER",
     "run_checks",
+    "verdict_of",
 ]
+
+
+def verdict_of(checks: Sequence[CheckResult]) -> bool:
+    """Return the all-GO verdict for a tuple of check results.
+
+    This is the pure predicate the CLI and any library caller share for
+    "did every check pass?". It mirrors
+    :attr:`launch_gate.models.Report.all_go`: an empty tuple is **not** all-GO
+    (at least one check must have run and be GO).
+
+    Args:
+        checks: The ordered check results (e.g. the tuple returned by
+            :func:`run_checks`).
+
+    Returns:
+        ``True`` iff ``checks`` is non-empty and every check's ``go`` is
+        ``True``; ``False`` otherwise (including the empty tuple).
+    """
+    return bool(checks) and all(c.go for c in checks)
 
 
 def run_checks(
@@ -71,9 +110,11 @@ def run_checks(
             default import-spec probe is used.
 
     Returns:
-        A tuple of four :class:`CheckResult` in stable order:
-        ``redirect-safety``, ``endpoint-contention``, ``wall-sizing``,
-        ``prerequisites``.
+        A tuple of four :class:`CheckResult` in the stable order given by
+        :data:`CHECK_ORDER` (``redirect-safety``, ``endpoint-contention``,
+        ``wall-sizing``, ``prerequisites``). The order is a contract: the report
+        renderer lays out the per-check table rows in exactly this order, and
+        :func:`verdict_of` folds the tuple over in this order.
     """
     return (
         check_redirect_safety(launch_line, cycles_out_text),

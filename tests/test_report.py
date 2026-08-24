@@ -95,3 +95,55 @@ def test_empty_checks_is_no_go() -> None:
     report = Report(header=("h",), checks=())
     out = render_report(report)
     assert out.split("\n")[-1] == "NO-GO"
+
+
+# ---------------------------------------------------------------------------
+# Cycle 13 — layout contract: named constants + render_header helper.
+# ---------------------------------------------------------------------------
+
+
+def test_render_header_matches_header_block() -> None:
+    from launch_gate.report import render_header
+
+    header = (
+        "launch line: nohup ./run.sh 3 4 >> cycles.out 2>&1 &",
+        "project dir: /home/u/proj (project 'proj')",
+    )
+    lines = render_header(header)
+    assert lines == [
+        "launch-gate report",
+        "=" * 40,
+        "launch line: nohup ./run.sh 3 4 >> cycles.out 2>&1 &",
+        "project dir: /home/u/proj (project 'proj')",
+        "",
+    ]
+
+
+def test_render_header_is_pure_and_deterministic() -> None:
+    from launch_gate.report import render_header
+
+    header = ("h1", "h2")
+    assert render_header(header) == render_header(header)
+
+
+def test_layout_constants_pin_the_golden_widths() -> None:
+    # The named constants are the single source of truth for the layout the
+    # golden test pins byte-for-byte.
+    from launch_gate import report as report_mod
+
+    assert report_mod._TITLE == "launch-gate report"
+    assert report_mod._RULE_WIDTH == 40
+    assert report_mod._NAME_WIDTH == 20
+    assert report_mod._SECTION_TITLE == "per-check verdicts"
+    assert report_mod._EVIDENCE_INDENT == "    "
+    assert report_mod._VERDICT_WIDTH == 6
+
+
+def test_render_report_uses_render_header() -> None:
+    # The header block of render_report is exactly render_header's output.
+    from launch_gate.report import render_header
+
+    report = _all_go_report()
+    out = render_report(report)
+    header_lines = render_header(report.header)
+    assert out.split("\n")[: len(header_lines)] == header_lines

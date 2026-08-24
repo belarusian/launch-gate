@@ -134,3 +134,58 @@ def test_run_checks_report_is_byte_identical_for_fixed_now(tmp_path: Path) -> No
     assert first == second
     # The wall-clock-derived value is pinned by the fixed now.
     assert "age 12s" in first
+
+
+# ---------------------------------------------------------------------------
+# Cycle 13 — byte-exact golden for an ALL-GO report (TICKET-044).
+# The no-GO golden above pins the NO-GO path; this pins the ALL-GO path
+# (including the final "ALL-GO" line) byte-for-byte.
+# ---------------------------------------------------------------------------
+
+_GOLDEN_ALL_GO_LINES: tuple[str, ...] = (
+    "launch-gate report",
+    "=" * 40,
+    "launch line: nohup ./run.sh 3 4 >> cycles.out 2>&1 &",
+    "project dir: /home/u/proj (project 'proj')",
+    "",
+    "per-check verdicts",
+    "-" * 40,
+    "redirect-safety      GO",
+    "    launch line appends (>>) to cycles.out.",
+    "endpoint-contention  GO",
+    "    no occupancy data; GO.",
+    "wall-sizing          GO",
+    "    outer wall (perl alarm): 21600s.",
+    "prerequisites        GO",
+    "    on branch main.",
+    "-" * 40,
+    "ALL-GO",
+)
+
+GOLDEN_REPORT_ALL_GO: str = "\n".join(_GOLDEN_ALL_GO_LINES)
+
+
+def _all_go_report() -> Report:
+    """Return the fixed all-GO report whose rendering is the all-GO golden."""
+    return Report(
+        header=(
+            "launch line: nohup ./run.sh 3 4 >> cycles.out 2>&1 &",
+            "project dir: /home/u/proj (project 'proj')",
+        ),
+        checks=(
+            CheckResult("redirect-safety", True, ("launch line appends (>>) to cycles.out.",)),
+            CheckResult("endpoint-contention", True, ("no occupancy data; GO.",)),
+            CheckResult("wall-sizing", True, ("outer wall (perl alarm): 21600s.",)),
+            CheckResult("prerequisites", True, ("on branch main.",)),
+        ),
+    )
+
+
+def test_render_report_all_go_matches_golden_byte_for_byte() -> None:
+    out = render_report(_all_go_report())
+    assert out == GOLDEN_REPORT_ALL_GO
+
+
+def test_all_go_golden_final_line_is_all_go() -> None:
+    out = render_report(_all_go_report())
+    assert out.split("\n")[-1] == "ALL-GO"
